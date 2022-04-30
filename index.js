@@ -1,200 +1,194 @@
 // Place your server entry point code here
-
-const { exit } = require('process')
 const express = require('express')
-const app = express()
-const morgan = require('morgan')
-const fs = require('fs')
+const req = require('express/lib/request')
+const app = express();
+// Require minimist module
+const args = require('minimist')(process.argv.slice(2))
 
 
-
-const args = require('minimist')(process.argv.slice(2), {
-    boolean: ['debug', 'log'],
-    default: {
-        debug: false,
-        log: false,
-    }
-}) 
-args['port', 'log', 'debug']
-
+// See what is stored in the object produced by minimist
 console.log(args)
-
-if (args.help) {
-    console.log(
-        "server.js [options] \n" + 
-        "\n" +
-        "\t --port \t Set the port number for the server to listen on. must be an integer between 1 and 65535.\n" +
-        "\t --debug \t If set to `true`, creates endpoints /app/log/access/ which returns a JSON access log from the database and /app/error/ which throws an error with the message " +
-            "\"Error test successful.\" " + "Defaults to `false`. \n" +
-        "\t --log \t If set to false, no log files are written. Defaults to 'true'. Logs are always written to database. \n" +
-        "\t --help \t Return this message and exit."
-    )
-    exit(0);
+// Store help text 
+const help = (`
+server.js [options]
+--port	Set the port number for the server to listen on. Must be an integer
+            between 1 and 65535.
+--debug	If set to true, creates endlpoints /app/log/access/ which returns
+            a JSON access log from the database and /app/error which throws 
+            an error with the message "Error test successful." Defaults to 
+            false.
+--log		If set to false, no log files are written. Defaults to true.
+            Logs are always written to database.
+--help	Return this message and exit.
+`)
+// If --help or -h, echo help text to STDOUT and exit
+if (args.help || args.h) {
+    console.log(help)
+    process.exit(0)
 }
 
-const database = require('./database')
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
-// Serve static HTML files
-app.use(express.static('./public'));
+const logdb = require('./src/services/database.js')
 
-app.use(express.urlencoded({extended: true}))
+const morgan = require('morgan')
+
+const fs = require('fs')
+
 app.use(express.json())
+app.use(express.urlencoded({extended: true}))
 
-// Start an app server
+const logging = (req, res, next) => {
+    console.log(req.body.number)
+    next()
+}
+
+args["port"]
 
 const port = args.port || 5555
 
 const server = app.listen(port, () => {
-    console.log('App listening on port %PORT%'.replace('%PORT%', port))
-});
-
-
-app.get('/app/', (req, res) => {
-    // Respond with status 200
-        res.statusCode = 200;
-    // Respind with status message 'OK'
-        res.statusMessage = "OK";
-        res.writeHead( res.statusCode, { 'Content-Type' : 'text/plain '});
-        res.end(res.statusCode + ' ' + res.statusMessage);
-});
-
-// Middleware function
-app.use( (req, res, next) => {
-    let logdata = {
-        remoteaddr: req.ip,
-        remoteuser: req.user,
-        time: Date.now(),
-        method: req.method,
-        url: req.url,
-        protocol: req.protocol,
-        httpversion: req.httpVersion,
-        status: res.statusCode,
-        referer: req.headers['referer'],
-        useragent: req.headers['user-agent']
-    }
-
-    const stmt = database.prepare(`INSERT INTO accesslog (remoteaddr, remoteuser, time, method, url, protocol, httpversion, status, referer, useragent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    stmt.run(logdata.remoteaddr, logdata.remoteuser, logdata.time, logdata.method, logdata.url, logdata.protocol, logdata.httpversion, logdata.status, logdata.referer, logdata.useragent)
-
-    next();
+    console.log('App is running on port %PORT%'.replace('%PORT%', port))
 })
 
-if (args.debug == true) {
-    app.get('/app/log/access', (req, res) => {
-        const select = database.prepare('SELECT * FROM accesslog').all();
-        res.status(200).json(select);
-    })
-
-    app.get('/app/error', (req, res) => {
-        throw new Error('Error test successful.')
-    })
-}
-
-if (args.log == true) {
-    const WRITESTREAM = fs.createWriteStream('FILE', { flags: 'a' });
-    app.use(morgan('FORMAT', { stream: WRITESTREAM }));
-}
-
-// Default response for any other request 
-
-app.use(function(req, res) {
-  res.status(404).send('404 NOT FOUND')
-});
-
-// Define check endpoint
-
-app.post('/app/flip', (req, res) => {
-    res.send({"flip": coinFlip()});
-})
-
-app.post('/app/flips/:number', (req, res) => {  
-    const flipResult = coinFlips(req.body.number);
-
-    
-    const result = {
-        "raw": flipResult,
-        "summary": countFlips(flipResult)
-    }
-
-    res.json(result);  
-})
-
-app.post('/app/flip/call/heads', (req, res) => {
-
-    res.status(200).json(flipACoin("heads"));
-})
-
-app.post('/app/flip/call/tails', (req, res) => {
-
-    res.status(200).json(flipACoin("tails"));
-})
-
-// Helper functions
+app.use(express.static('./public'));
 
 function coinFlip() {
-    const options = ["heads", "tails"];
   
-    const randomNumber = Math.floor(Math.random() * options.length);
+  const options = ["heads", "tails"];
   
-    return options[randomNumber];
+  const randomNumber = Math.floor(Math.random() * options.length);
+
+  return options[randomNumber];
 }
 
 function coinFlips(flips) {
-    const result = [];
+  const result = [];
 
-    for (let i = 0; i < flips; i++) {
-      result[i] = coinFlip();
-    }
+  for (let i = 0; i < flips; i++) {
+    result[i] = coinFlip();
+  }
 
-    return result;
+  return result;
 }
 
 function countFlips(array) {
-    let headCount = 0;
-    let tailsCount = 0;
-    
-    for (let i = 0; i < array.length; i++) {
-      if (array[i] == "heads") {
-        headCount++;
-      } 
+  let headCount = 0;
+  let tailsCount = 0;
   
-      if (array[i] == "tails") {
-        tailsCount++;
-      }
-    }
-  
-    if (headCount == 0 || tailsCount == 0) {
-      if (headCount == 0) {
-        return "{ tails: " + tailsCount + " }";
-      } else if (tailsCount == 0) {
-        return "{ heads: " + headCount + " }";
-      }
-    }
+  for (let i = 0; i < array.length; i++) {
+    if (array[i] == "heads") {
+      headCount++;
+    } 
 
-    const result = {
-      "tails": tailsCount,
-      "heads": headCount
+    if (array[i] == "tails") {
+      tailsCount++;
     }
-  
-    return result;
+  }
+
+  if (headCount == 0 || tailsCount == 0) {
+    if (headCount == 0) {
+      return "{ tails: " + tailsCount + " }";
+    } else if (tailsCount == 0) {
+      return "{ heads: " + headCount + " }";
+    }
+  }
+
+  const result = {
+    "tails": tailsCount,
+    "heads": headCount
+  }
+
+  return result;
+
 }
 
 function flipACoin(call) {
-    let flipResult = "";
+
+  let flipResult = "";
   
-    let flip = coinFlip();
+  let flip = coinFlip();
+
+  if (flip == call) {
+    flipResult = "win";
+  } else {
+    flipResult = "lose";
+  }
   
-    if (flip == call) {
-      flipResult = "win";
-    } else {
-      flipResult = "lose";
-    }
-    
-    const result = {
-      "call": call,
-      "flip": flip,
-      "result": flipResult
-    }
-  
-    return result;
+  const result = {
+    "call": call,
+    "flip": flip,
+    "result": flipResult
+  }
+
+  return result;
 }
+
+// Create a write stream to append (flags: 'a') to a file
+const WRITESTREAM = fs.createWriteStream('accesslog', { flags: 'a' })
+
+// Set up the access logging middleware
+app.use(morgan('combined', { stream: WRITESTREAM }))
+
+app.use( (req, res, next) => {
+    let theLog = {
+
+        remoteaddr: req.ip,
+        remoteuser: req.user,
+        time: Date.now(),
+        url: req.url,
+        protocol: req.protocol,
+        httpversion: req.httpVersion,
+        status: req.statusCode,
+        referer: req.headers['referer'],
+        useragent: req.headers['user-agent']
+
+    }
+
+    const logit = logdb.prepare('INSERT INTO accesslog (remote_addr, remote_user, datetime, url, http_version, status, referrer_url, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const runit = logit.run(theLog.remoteaddr, theLog.remoteuser, theLog.time, theLog.url, theLog.httpversion, theLog.status, theLog.referer, theLog.useragent);
+    next();
+});
+
+app.get('/app/error', (req, res) => {
+  throw new Error('Error test successful.')
+})
+
+app.get('/app', (req, res) => {
+    res.type('text/plain')
+    res.status(200).end('OK')
+})
+
+app.get('/app/log/access', (req, res) => {
+    const out = logdb.prepare('SELECT * FROM accesslog').all()
+    res.status(200).json(out)
+})
+
+app.get('/app/echo/:number', express.json(), (req, res) => {
+    res.status(200).json({ 'message' : req.params.number })
+})
+
+app.get('/app/echo/', logging, (req, res) => {
+    res.status(200).json({ 'message' : req.body.number })
+})
+
+app.get('/app/flip', (req, res) => {
+    res.status(200).json({ 'flip' : coinFlip() })
+})
+
+app.get('/app/flips/:number', (req, res) => {
+
+    let array = coinFlips(req.params.number);
+
+    res.status(200).json({ 'raw' : array, 'summary' : countFlips(array) })
+})
+
+app.get('/app/flip/call/:call', (req, res) => {
+    res.status(200).json( flipACoin(req.params.call) )
+})
+
+app.use(function(req, res) {
+    res.type("text/plain")
+    res.status(404).send("Endpoint does not exist")
+})
